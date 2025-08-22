@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECSD Camera</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+  body { background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px;}
+  h1 { margin: 20px 0; font-size: 2rem; text-align: center; }
+  #cameraContainer { position: relative; width: 100%; max-width: 720px; flex: 1; display: flex; align-items: center; justify-content: center; }
+  video { width: 100%; height: auto; border-radius: 10px; background: #000; }
+  canvas { display: none; }
+  #previewContainer { margin-top: 15px; display: flex; flex-direction: column; align-items: center; }
+  #previewContainer img, #previewContainer video { width: 320px; max-width: 100%; margin-top: 10px; border: 1px solid #ccc; border-radius: 5px; }
+  #controls { display: flex; flex-wrap: wrap; justify-content: center; margin: 15px 0; gap: 10px; }
+  select, button { padding: 10px 15px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; }
+  select { background: #333; color: #fff; }
+  button { background: #0078d4; color: #fff; transition: background 0.3s; }
+  button:hover { background: #005a9e; }
+  #status { margin-top: 10px; font-size: 16px; color: #0f0; }
+</style>
+</head>
+<body>
+
+<h1>ECSD Camera</h1>
+
+<div id="cameraContainer">
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
+
+<div id="controls">
+  <label>
+    Camera:
+    <select id="cameraSelect">
+      <option value="user">Front</option>
+      <option value="environment">Back</option>
+    </select>
+  </label>
+
+  <label>
+    Mode:
+    <select id="modeSelect">
+      <option value="photo">Photo</option>
+      <option value="video">Video</option>
+    </select>
+  </label>
+
+  <button id="start">Take Photo / Start Recording</button>
+  <button id="stop" style="display:none;">Stop Recording</button>
+  <button id="download" style="display:none;">Download</button>
+</div>
+
+<div id="status"></div>
+<div id="previewContainer"></div>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const startBtn = document.getElementById('start');
+const stopBtn = document.getElementById('stop');
+const downloadBtn = document.getElementById('download');
+const modeSelect = document.getElementById('modeSelect');
+const cameraSelect = document.getElementById('cameraSelect');
+const previewContainer = document.getElementById('previewContainer');
+const status = document.getElementById('status');
+
+let mediaStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+
+// Start camera with fallback
+async function startCamera(facingMode = 'user') {
+  if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
+  const constraints = { video: { facingMode }, audio: true };
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = mediaStream;
+  } catch (err) {
+    console.warn("FacingMode failed, falling back to default camera", err);
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      video.srcObject = mediaStream;
+    } catch (err2) {
+      status.textContent = "Error accessing camera/microphone.";
+      console.error(err2);
+    }
+  }
+}
+
+// Change camera
+cameraSelect.addEventListener('change', e => startCamera(e.target.value));
+startCamera(cameraSelect.value);
+
+// Start capture
+startBtn.addEventListener('click', () => {
+  const mode = modeSelect.value;
+  status.textContent = '';
+
+  if (mode === 'photo') {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+
+    // Show photo preview
+    canvas.toBlob(blob => {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(blob);
+      previewContainer.innerHTML = '';
+      previewContainer.appendChild(img);
+    }, 'image/png');
+
+    downloadBtn.style.display = 'inline-block';
+    status.textContent = 'Photo ready!';
+  } else if (mode === 'video') {
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(mediaStream);
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      downloadBtn.style.display = 'inline-block';
+      startBtn.style.display = 'inline-block';
+      stopBtn.style.display = 'none';
+
+      // Show video preview
+      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      const vid = document.createElement('video');
+      vid.src = URL.createObjectURL(blob);
+      vid.controls = true;
+      previewContainer.innerHTML = '';
+      previewContainer.appendChild(vid);
+
+      status.textContent = 'Video recorded!';
+    };
+    mediaRecorder.start();
+    startBtn.style.display = 'none';
+    stopBtn.style.display = 'inline-block';
+    status.textContent = 'Recording video...';
+  }
+});
+
+// Stop recording
+stopBtn.addEventListener('click', () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+});
+
+// Download media
+downloadBtn.addEventListener('click', () => {
+  const mode = modeSelect.value;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  if (mode === 'photo') {
+    canvas.toBlob(blob => {
+      const link = document.createElement('a');
+      link.download = `Photo_${timestamp}.png`;
+      link.href = URL.createObjectURL(blob);
+      link.click();
+      URL.revokeObjectURL(link.href);
+      downloadBtn.style.display = 'none';
+    }, 'image/png');
+  } else if (mode === 'video') {
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const link = document.createElement('a');
+    link.download = `Video_${timestamp}.webm`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+    URL.revokeObjectURL(link.href);
+    downloadBtn.style.display = 'none';
+  }
+});
+</script>
+</body>
+</html>
