@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ECSD Camera</title>
+
+<!-- Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-880CQT3EE8"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-880CQT3EE8');
+</script>
+
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
   body { background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px;}
@@ -201,11 +212,8 @@ function startQRScan() {
     const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
     const code = jsQR(imageData.data, imageData.width, imageData.height);
     if (code) {
-      // Make QR code clickable
       let url = code.data;
-      if (!/^https?:\/\//i.test(url)) {
-        url = 'https://' + url; // Add https if missing
-      }
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
       status.innerHTML = `QR Code detected: <a href="${url}" target="_blank">${url}</a>`;
       scanning = false;
       startBtn.style.display = 'inline-block';
