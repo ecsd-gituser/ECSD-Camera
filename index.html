@@ -18,7 +18,8 @@
   select { background: #333; color: #fff; }
   button { background: #0078d4; color: #fff; transition: background 0.3s; }
   button:hover { background: #005a9e; }
-  #status { margin-top: 10px; font-size: 16px; color: #0f0; }
+  #status { margin-top: 10px; font-size: 16px; color: #0f0; text-align: center; word-break: break-word; }
+  a { color: #0ff; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -44,17 +45,19 @@
     <select id="modeSelect">
       <option value="photo">Photo</option>
       <option value="video">Video</option>
+      <option value="qr">QR Scan</option>
     </select>
   </label>
 
-  <button id="start">Take Photo / Start Recording</button>
-  <button id="stop" style="display:none;">Stop Recording</button>
+  <button id="start">Start</button>
+  <button id="stop" style="display:none;">Stop</button>
   <button id="download" style="display:none;">Download</button>
 </div>
 
 <div id="status"></div>
 <div id="previewContainer"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -69,80 +72,51 @@ const status = document.getElementById('status');
 let mediaStream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
+let scanning = false;
+let qrAnimationFrame = null;
 
-// Start camera with fallback
+// Start camera
 async function startCamera(facingMode = 'user') {
   if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
-  const constraints = { video: { facingMode }, audio: true };
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
     video.srcObject = mediaStream;
   } catch (err) {
-    console.warn("FacingMode failed, falling back to default camera", err);
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      video.srcObject = mediaStream;
-    } catch (err2) {
-      status.textContent = "Error accessing camera/microphone.";
-      console.error(err2);
-    }
+    status.textContent = "Error accessing camera/microphone.";
+    console.error(err);
   }
 }
 
-// Change camera
 cameraSelect.addEventListener('change', e => startCamera(e.target.value));
 startCamera(cameraSelect.value);
 
-// Start capture
+// Capture / Record / QR
 startBtn.addEventListener('click', () => {
   const mode = modeSelect.value;
   status.textContent = '';
+  previewContainer.innerHTML = '';
 
   if (mode === 'photo') {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
-
-    // Show photo preview
-    canvas.toBlob(blob => {
-      const img = document.createElement('img');
-      img.src = URL.createObjectURL(blob);
-      previewContainer.innerHTML = '';
-      previewContainer.appendChild(img);
-    }, 'image/png');
-
-    downloadBtn.style.display = 'inline-block';
-    status.textContent = 'Photo ready!';
+    takePhoto();
   } else if (mode === 'video') {
-    recordedChunks = [];
-    mediaRecorder = new MediaRecorder(mediaStream);
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      downloadBtn.style.display = 'inline-block';
-      startBtn.style.display = 'inline-block';
-      stopBtn.style.display = 'none';
-
-      // Show video preview
-      const blob = new Blob(recordedChunks, { type: 'video/webm' });
-      const vid = document.createElement('video');
-      vid.src = URL.createObjectURL(blob);
-      vid.controls = true;
-      previewContainer.innerHTML = '';
-      previewContainer.appendChild(vid);
-
-      status.textContent = 'Video recorded!';
-    };
-    mediaRecorder.start();
-    startBtn.style.display = 'none';
-    stopBtn.style.display = 'inline-block';
-    status.textContent = 'Recording video...';
+    startVideoRecording();
+  } else if (mode === 'qr') {
+    startQRScan();
   }
 });
 
-// Stop recording
+// Stop recording or scanning
 stopBtn.addEventListener('click', () => {
-  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+  if (scanning) {
+    scanning = false;
+    cancelAnimationFrame(qrAnimationFrame);
+    status.textContent = "QR scanning stopped.";
+    stopBtn.style.display = 'none';
+    startBtn.style.display = 'inline-block';
+  }
 });
 
 // Download media
@@ -169,6 +143,81 @@ downloadBtn.addEventListener('click', () => {
     downloadBtn.style.display = 'none';
   }
 });
+
+// Photo capture
+function takePhoto() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+
+  canvas.toBlob(blob => {
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(blob);
+    previewContainer.appendChild(img);
+    downloadBtn.style.display = 'inline-block';
+    status.textContent = 'Photo ready!';
+  }, 'image/png');
+}
+
+// Video recording
+function startVideoRecording() {
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(mediaStream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const vid = document.createElement('video');
+    vid.src = URL.createObjectURL(blob);
+    vid.controls = true;
+    previewContainer.appendChild(vid);
+
+    downloadBtn.style.display = 'inline-block';
+    startBtn.style.display = 'inline-block';
+    stopBtn.style.display = 'none';
+    status.textContent = 'Video recorded!';
+  };
+  mediaRecorder.start();
+  startBtn.style.display = 'none';
+  stopBtn.style.display = 'inline-block';
+  status.textContent = 'Recording video...';
+}
+
+// QR scanning
+function startQRScan() {
+  scanning = true;
+  startBtn.style.display = 'none';
+  stopBtn.style.display = 'inline-block';
+  status.textContent = 'Scanning for QR codes...';
+
+  const scanCanvas = document.createElement('canvas');
+  const scanCtx = scanCanvas.getContext('2d');
+
+  function scanTick() {
+    if (!scanning) return;
+    scanCanvas.width = video.videoWidth;
+    scanCanvas.height = video.videoHeight;
+    scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+    const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height);
+    if (code) {
+      // Make QR code clickable
+      let url = code.data;
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url; // Add https if missing
+      }
+      status.innerHTML = `QR Code detected: <a href="${url}" target="_blank">${url}</a>`;
+      scanning = false;
+      startBtn.style.display = 'inline-block';
+      stopBtn.style.display = 'none';
+      return;
+    }
+    qrAnimationFrame = requestAnimationFrame(scanTick);
+  }
+
+  scanTick();
+}
 </script>
+
 </body>
 </html>
