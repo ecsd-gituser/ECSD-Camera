@@ -29,7 +29,6 @@
   button { background: #0078d4; color: #fff; }
   button:hover { background: #005a9e; }
   #status { margin-top: 10px; color: #0f0; text-align: center; }
-  a { color: #0ff; }
 </style>
 </head>
 
@@ -60,7 +59,8 @@
     </select>
   </label>
 
-  <label>
+  <!-- FORMAT DROPDOWN (now wrapped) -->
+  <label id="formatContainer">
     Format:
     <select id="formatSelect">
       <option value="webm">WebM</option>
@@ -87,6 +87,7 @@ const downloadBtn = document.getElementById('download');
 const modeSelect = document.getElementById('modeSelect');
 const cameraSelect = document.getElementById('cameraSelect');
 const formatSelect = document.getElementById('formatSelect');
+const formatContainer = document.getElementById('formatContainer');
 const previewContainer = document.getElementById('previewContainer');
 const status = document.getElementById('status');
 
@@ -96,6 +97,19 @@ let recordedChunks = [];
 let scanning = false;
 let qrAnimationFrame = null;
 let currentMimeType = 'video/webm';
+
+// Show/hide format dropdown
+function updateUI() {
+  const mode = modeSelect.value;
+  if (mode === 'video') {
+    formatContainer.style.display = 'inline-block';
+  } else {
+    formatContainer.style.display = 'none';
+  }
+}
+
+modeSelect.addEventListener('change', updateUI);
+updateUI();
 
 // Start camera
 async function startCamera(facingMode = 'user') {
