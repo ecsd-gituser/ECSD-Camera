@@ -11,7 +11,6 @@
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-
   gtag('config', 'G-880CQT3EE8');
 </script>
 
@@ -20,19 +19,20 @@
   body { background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px;}
   h1 { margin: 20px 0; font-size: 2rem; text-align: center; }
   #cameraContainer { position: relative; width: 100%; max-width: 720px; flex: 1; display: flex; align-items: center; justify-content: center; }
-  video { width: 100%; height: auto; border-radius: 10px; background: #000; }
+  video { width: 100%; border-radius: 10px; background: #000; }
   canvas { display: none; }
   #previewContainer { margin-top: 15px; display: flex; flex-direction: column; align-items: center; }
   #previewContainer img, #previewContainer video { width: 320px; max-width: 100%; margin-top: 10px; border: 1px solid #ccc; border-radius: 5px; }
   #controls { display: flex; flex-wrap: wrap; justify-content: center; margin: 15px 0; gap: 10px; }
   select, button { padding: 10px 15px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; }
   select { background: #333; color: #fff; }
-  button { background: #0078d4; color: #fff; transition: background 0.3s; }
+  button { background: #0078d4; color: #fff; }
   button:hover { background: #005a9e; }
-  #status { margin-top: 10px; font-size: 16px; color: #0f0; text-align: center; word-break: break-word; }
-  a { color: #0ff; text-decoration: underline; }
+  #status { margin-top: 10px; color: #0f0; text-align: center; }
+  a { color: #0ff; }
 </style>
 </head>
+
 <body>
 
 <h1>ECSD Camera</h1>
@@ -60,6 +60,14 @@
     </select>
   </label>
 
+  <label>
+    Format:
+    <select id="formatSelect">
+      <option value="webm">WebM</option>
+      <option value="mp4">MP4 (if supported)</option>
+    </select>
+  </label>
+
   <button id="start">Start</button>
   <button id="stop" style="display:none;">Stop</button>
   <button id="download" style="display:none;">Download</button>
@@ -69,6 +77,7 @@
 <div id="previewContainer"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
 <script>
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -77,6 +86,7 @@ const stopBtn = document.getElementById('stop');
 const downloadBtn = document.getElementById('download');
 const modeSelect = document.getElementById('modeSelect');
 const cameraSelect = document.getElementById('cameraSelect');
+const formatSelect = document.getElementById('formatSelect');
 const previewContainer = document.getElementById('previewContainer');
 const status = document.getElementById('status');
 
@@ -85,38 +95,38 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let scanning = false;
 let qrAnimationFrame = null;
+let currentMimeType = 'video/webm';
 
 // Start camera
 async function startCamera(facingMode = 'user') {
   if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: true });
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode },
+      audio: true
+    });
     video.srcObject = mediaStream;
   } catch (err) {
-    status.textContent = "Error accessing camera/microphone.";
-    console.error(err);
+    status.textContent = "Camera/mic access denied.";
   }
 }
 
 cameraSelect.addEventListener('change', e => startCamera(e.target.value));
 startCamera(cameraSelect.value);
 
-// Capture / Record / QR
+// Start button
 startBtn.addEventListener('click', () => {
-  const mode = modeSelect.value;
-  status.textContent = '';
   previewContainer.innerHTML = '';
+  status.textContent = '';
 
-  if (mode === 'photo') {
-    takePhoto();
-  } else if (mode === 'video') {
-    startVideoRecording();
-  } else if (mode === 'qr') {
-    startQRScan();
-  }
+  const mode = modeSelect.value;
+
+  if (mode === 'photo') takePhoto();
+  else if (mode === 'video') startVideoRecording();
+  else startQRScan();
 });
 
-// Stop recording or scanning
+// Stop button
 stopBtn.addEventListener('click', () => {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
@@ -124,60 +134,75 @@ stopBtn.addEventListener('click', () => {
   if (scanning) {
     scanning = false;
     cancelAnimationFrame(qrAnimationFrame);
-    status.textContent = "QR scanning stopped.";
-    stopBtn.style.display = 'none';
-    startBtn.style.display = 'inline-block';
+    status.textContent = "QR stopped.";
   }
+  stopBtn.style.display = 'none';
+  startBtn.style.display = 'inline-block';
 });
 
-// Download media
+// Download
 downloadBtn.addEventListener('click', () => {
-  const mode = modeSelect.value;
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-  if (mode === 'photo') {
+  if (modeSelect.value === 'photo') {
     canvas.toBlob(blob => {
       const link = document.createElement('a');
       link.download = `Photo_${timestamp}.png`;
       link.href = URL.createObjectURL(blob);
       link.click();
-      URL.revokeObjectURL(link.href);
-      downloadBtn.style.display = 'none';
-    }, 'image/png');
-  } else if (mode === 'video') {
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    });
+  } else {
+    const extension = currentMimeType.includes('mp4') ? 'mp4' : 'webm';
+    const blob = new Blob(recordedChunks, { type: currentMimeType });
+
     const link = document.createElement('a');
-    link.download = `Video_${timestamp}.webm`;
+    link.download = `Video_${timestamp}.${extension}`;
     link.href = URL.createObjectURL(blob);
     link.click();
-    URL.revokeObjectURL(link.href);
-    downloadBtn.style.display = 'none';
   }
+
+  downloadBtn.style.display = 'none';
 });
 
-// Photo capture
+// Photo
 function takePhoto() {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0);
+  canvas.getContext('2d').drawImage(video, 0, 0);
 
-  canvas.toBlob(blob => {
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(blob);
-    previewContainer.appendChild(img);
-    downloadBtn.style.display = 'inline-block';
-    status.textContent = 'Photo ready!';
-  }, 'image/png');
+  const img = document.createElement('img');
+  img.src = canvas.toDataURL('image/png');
+  previewContainer.appendChild(img);
+
+  downloadBtn.style.display = 'inline-block';
+  status.textContent = 'Photo ready!';
 }
 
-// Video recording
+// Video
 function startVideoRecording() {
   recordedChunks = [];
-  mediaRecorder = new MediaRecorder(mediaStream);
-  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+
+  let mimeType = 'video/webm';
+
+  if (formatSelect.value === 'mp4') {
+    if (MediaRecorder.isTypeSupported('video/mp4')) {
+      mimeType = 'video/mp4';
+    } else {
+      status.textContent = 'MP4 not supported, using WebM.';
+    }
+  }
+
+  currentMimeType = mimeType;
+
+  mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+
   mediaRecorder.onstop = () => {
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const blob = new Blob(recordedChunks, { type: currentMimeType });
+
     const vid = document.createElement('video');
     vid.src = URL.createObjectURL(blob);
     vid.controls = true;
@@ -186,44 +211,50 @@ function startVideoRecording() {
     downloadBtn.style.display = 'inline-block';
     startBtn.style.display = 'inline-block';
     stopBtn.style.display = 'none';
-    status.textContent = 'Video recorded!';
+    status.textContent = 'Video ready!';
   };
+
   mediaRecorder.start();
   startBtn.style.display = 'none';
   stopBtn.style.display = 'inline-block';
-  status.textContent = 'Recording video...';
+  status.textContent = 'Recording...';
 }
 
-// QR scanning
+// QR
 function startQRScan() {
   scanning = true;
   startBtn.style.display = 'none';
   stopBtn.style.display = 'inline-block';
-  status.textContent = 'Scanning for QR codes...';
+  status.textContent = 'Scanning QR...';
 
   const scanCanvas = document.createElement('canvas');
-  const scanCtx = scanCanvas.getContext('2d');
+  const ctx = scanCanvas.getContext('2d');
 
-  function scanTick() {
+  function scan() {
     if (!scanning) return;
+
     scanCanvas.width = video.videoWidth;
     scanCanvas.height = video.videoHeight;
-    scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
-    const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+    ctx.drawImage(video, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
     const code = jsQR(imageData.data, imageData.width, imageData.height);
+
     if (code) {
       let url = code.data;
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-      status.innerHTML = `QR Code detected: <a href="${url}" target="_blank">${url}</a>`;
+
+      status.innerHTML = `QR: <a href="${url}" target="_blank">${url}</a>`;
       scanning = false;
       startBtn.style.display = 'inline-block';
       stopBtn.style.display = 'none';
       return;
     }
-    qrAnimationFrame = requestAnimationFrame(scanTick);
+
+    qrAnimationFrame = requestAnimationFrame(scan);
   }
 
-  scanTick();
+  scan();
 }
 </script>
 
