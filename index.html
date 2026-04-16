@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ECSD Camera</title>
-
 <!-- Google Analytics -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-880CQT3EE8"></script>
 <script>
@@ -13,22 +12,44 @@
   gtag('js', new Date());
   gtag('config', 'G-880CQT3EE8');
 </script>
-
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
-  body { background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px;}
-  h1 { margin: 20px 0; font-size: 2rem; text-align: center; }
-  #cameraContainer { position: relative; width: 100%; max-width: 720px; flex: 1; display: flex; align-items: center; justify-content: center; }
-  video { width: 100%; border-radius: 10px; background: #000; }
-  canvas { display: none; }
-  #previewContainer { margin-top: 15px; display: flex; flex-direction: column; align-items: center; }
-  #previewContainer img, #previewContainer video { width: 320px; max-width: 100%; margin-top: 10px; border: 1px solid #ccc; border-radius: 5px; }
-  #controls { display: flex; flex-wrap: wrap; justify-content: center; margin: 15px 0; gap: 10px; }
-  select, button { padding: 10px 15px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; }
-  select { background: #333; color: #fff; }
-  button { background: #0078d4; color: #fff; }
-  button:hover { background: #005a9e; }
-  #status { margin-top: 10px; color: #0f0; text-align: center; }
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+body { background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px;}
+h1 { margin: 20px 0; font-size: 2rem; text-align: center; }
+
+#cameraContainer { width: 100%; max-width: 720px; }
+video { width: 100%; border-radius: 10px; background: #000; }
+canvas { display: none; }
+
+#previewContainer img, #previewContainer video {
+  width: 320px;
+  margin-top: 10px;
+  border-radius: 5px;
+}
+
+#controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 15px 0;
+  gap: 10px;
+}
+
+select, button {
+  padding: 10px;
+  border-radius: 5px;
+  border: none;
+}
+
+button {
+  background: #0078d4;
+  color: #fff;
+}
+
+#status {
+  margin-top: 10px;
+  color: #0f0;
+}
 </style>
 </head>
 
@@ -42,29 +63,20 @@
 </div>
 
 <div id="controls">
-  <label>
-    Camera:
-    <select id="cameraSelect">
-      <option value="user">Front</option>
-      <option value="environment">Back</option>
-    </select>
-  </label>
+  <select id="cameraSelect"></select>
 
-  <label>
-    Mode:
-    <select id="modeSelect">
-      <option value="photo">Photo</option>
-      <option value="video">Video</option>
-      <option value="qr">QR Scan</option>
-    </select>
-  </label>
+  <select id="modeSelect">
+    <option value="photo">Photo</option>
+    <option value="video">Video</option>
+    <option value="qr">QR Scan</option>
+  </select>
 
-  <!-- FORMAT DROPDOWN (now wrapped) -->
+  <!-- FORMAT (TOGGLED) -->
   <label id="formatContainer">
     Format:
     <select id="formatSelect">
       <option value="webm">WebM</option>
-      <option value="mp4">MP4 (if supported)</option>
+      <option value="mp4">MP4</option>
     </select>
   </label>
 
@@ -81,146 +93,130 @@
 <script>
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
+const cameraSelect = document.getElementById('cameraSelect');
+const modeSelect = document.getElementById('modeSelect');
+const formatSelect = document.getElementById('formatSelect');
+const formatContainer = document.getElementById('formatContainer');
 const startBtn = document.getElementById('start');
 const stopBtn = document.getElementById('stop');
 const downloadBtn = document.getElementById('download');
-const modeSelect = document.getElementById('modeSelect');
-const cameraSelect = document.getElementById('cameraSelect');
-const formatSelect = document.getElementById('formatSelect');
-const formatContainer = document.getElementById('formatContainer');
-const previewContainer = document.getElementById('previewContainer');
+const preview = document.getElementById('previewContainer');
 const status = document.getElementById('status');
 
-let mediaStream = null;
-let mediaRecorder = null;
-let recordedChunks = [];
+let stream = null;
+let recorder = null;
+let chunks = [];
 let scanning = false;
-let qrAnimationFrame = null;
-let currentMimeType = 'video/webm';
+let currentMime = 'video/webm';
 
-// Show/hide format dropdown
-function updateUI() {
-  const mode = modeSelect.value;
-  if (mode === 'video') {
+
+// ✅ TOGGLE FORMAT DROPDOWN
+function updateFormatVisibility() {
+  if (modeSelect.value === 'video') {
     formatContainer.style.display = 'inline-block';
   } else {
     formatContainer.style.display = 'none';
+    formatSelect.value = 'webm';
   }
 }
 
-modeSelect.addEventListener('change', updateUI);
-updateUI();
+modeSelect.addEventListener('change', updateFormatVisibility);
 
-// Start camera
-async function startCamera(facingMode = 'user') {
-  if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
+
+// ✅ INIT
+async function init() {
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode },
+    await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === 'videoinput');
+
+    cameraSelect.innerHTML = '';
+
+    cameras.forEach((cam, i) => {
+      const option = document.createElement('option');
+      option.value = cam.deviceId;
+
+      if (cam.label.toLowerCase().includes('front')) option.text = 'Front Camera';
+      else if (cam.label.toLowerCase().includes('back')) option.text = 'Back Camera';
+      else option.text = cam.label || `Camera ${i+1}`;
+
+      cameraSelect.appendChild(option);
+    });
+
+    if (cameraSelect.value) startCamera(cameraSelect.value);
+
+  } catch {
+    status.textContent = 'Permission denied or blocked.';
+  }
+}
+
+
+// ✅ START CAMERA
+async function startCamera(deviceId) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId } },
       audio: true
     });
-    video.srcObject = mediaStream;
+
+    video.srcObject = stream;
+
+    video.onloadedmetadata = async () => {
+      try { await video.play(); } catch {}
+    };
+
+    status.textContent = 'Camera active';
+
   } catch (err) {
-    status.textContent = "Camera/mic access denied.";
+    console.error(err);
+    status.textContent = 'Camera error.';
   }
 }
 
-cameraSelect.addEventListener('change', e => startCamera(e.target.value));
-startCamera(cameraSelect.value);
-
-// Start button
-startBtn.addEventListener('click', () => {
-  previewContainer.innerHTML = '';
-  status.textContent = '';
-
-  const mode = modeSelect.value;
-
-  if (mode === 'photo') takePhoto();
-  else if (mode === 'video') startVideoRecording();
-  else startQRScan();
+cameraSelect.addEventListener('change', () => {
+  startCamera(cameraSelect.value);
 });
 
-// Stop button
-stopBtn.addEventListener('click', () => {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-  }
-  if (scanning) {
-    scanning = false;
-    cancelAnimationFrame(qrAnimationFrame);
-    status.textContent = "QR stopped.";
-  }
-  stopBtn.style.display = 'none';
-  startBtn.style.display = 'inline-block';
-});
 
-// Download
-downloadBtn.addEventListener('click', () => {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-  if (modeSelect.value === 'photo') {
-    canvas.toBlob(blob => {
-      const link = document.createElement('a');
-      link.download = `Photo_${timestamp}.png`;
-      link.href = URL.createObjectURL(blob);
-      link.click();
-    });
-  } else {
-    const extension = currentMimeType.includes('mp4') ? 'mp4' : 'webm';
-    const blob = new Blob(recordedChunks, { type: currentMimeType });
-
-    const link = document.createElement('a');
-    link.download = `Video_${timestamp}.${extension}`;
-    link.href = URL.createObjectURL(blob);
-    link.click();
-  }
-
-  downloadBtn.style.display = 'none';
-});
-
-// Photo
+// 📸 PHOTO
 function takePhoto() {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0);
 
   const img = document.createElement('img');
-  img.src = canvas.toDataURL('image/png');
-  previewContainer.appendChild(img);
+  img.src = canvas.toDataURL();
+  preview.appendChild(img);
 
   downloadBtn.style.display = 'inline-block';
   status.textContent = 'Photo ready!';
 }
 
-// Video
-function startVideoRecording() {
-  recordedChunks = [];
 
-  let mimeType = 'video/webm';
+// 🎥 VIDEO
+function startRecording() {
+  chunks = [];
 
-  if (formatSelect.value === 'mp4') {
-    if (MediaRecorder.isTypeSupported('video/mp4')) {
-      mimeType = 'video/mp4';
-    } else {
-      status.textContent = 'MP4 not supported, using WebM.';
-    }
+  let mime = 'video/webm';
+  if (formatSelect.value === 'mp4' && MediaRecorder.isTypeSupported('video/mp4')) {
+    mime = 'video/mp4';
   }
 
-  currentMimeType = mimeType;
+  currentMime = mime;
 
-  mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+  recorder = new MediaRecorder(stream, { mimeType: mime });
 
-  mediaRecorder.ondataavailable = e => {
-    if (e.data.size > 0) recordedChunks.push(e.data);
-  };
+  recorder.ondataavailable = e => chunks.push(e.data);
 
-  mediaRecorder.onstop = () => {
-    const blob = new Blob(recordedChunks, { type: currentMimeType });
-
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: currentMime });
     const vid = document.createElement('video');
     vid.src = URL.createObjectURL(blob);
     vid.controls = true;
-    previewContainer.appendChild(vid);
+    preview.appendChild(vid);
 
     downloadBtn.style.display = 'inline-block';
     startBtn.style.display = 'inline-block';
@@ -228,35 +224,38 @@ function startVideoRecording() {
     status.textContent = 'Video ready!';
   };
 
-  mediaRecorder.start();
+  recorder.start();
   startBtn.style.display = 'none';
   stopBtn.style.display = 'inline-block';
   status.textContent = 'Recording...';
 }
 
-// QR
-function startQRScan() {
+
+// 🔍 QR (CLICKABLE LINKS RESTORED)
+function startQR() {
   scanning = true;
   startBtn.style.display = 'none';
   stopBtn.style.display = 'inline-block';
   status.textContent = 'Scanning QR...';
 
-  const scanCanvas = document.createElement('canvas');
-  const ctx = scanCanvas.getContext('2d');
+  const ctx = canvas.getContext('2d');
 
-  function scan() {
+  function loop() {
     if (!scanning) return;
 
-    scanCanvas.width = video.videoWidth;
-    scanCanvas.height = video.videoHeight;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
 
-    const imageData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(img.data, img.width, img.height);
 
     if (code) {
       let url = code.data;
-      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+      }
 
       status.innerHTML = `QR: <a href="${url}" target="_blank">${url}</a>`;
       scanning = false;
@@ -265,11 +264,43 @@ function startQRScan() {
       return;
     }
 
-    qrAnimationFrame = requestAnimationFrame(scan);
+    requestAnimationFrame(loop);
   }
 
-  scan();
+  loop();
 }
+
+
+// 🔘 BUTTONS
+startBtn.onclick = () => {
+  preview.innerHTML = '';
+  status.textContent = '';
+
+  if (modeSelect.value === 'photo') takePhoto();
+  else if (modeSelect.value === 'video') startRecording();
+  else startQR();
+};
+
+stopBtn.onclick = () => {
+  if (recorder && recorder.state === 'recording') recorder.stop();
+  scanning = false;
+
+  startBtn.style.display = 'inline-block';
+  stopBtn.style.display = 'none';
+};
+
+downloadBtn.onclick = () => {
+  const blob = new Blob(chunks, { type: currentMime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'recording.webm';
+  a.click();
+};
+
+
+// 🚀 START
+updateFormatVisibility();
+init();
 </script>
 
 </body>
