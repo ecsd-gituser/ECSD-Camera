@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ECSD Camera</title>
+
 <!-- Google Analytics -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-880CQT3EE8"></script>
 <script>
@@ -12,6 +13,7 @@
   gtag('js', new Date());
   gtag('config', 'G-880CQT3EE8');
 </script>
+
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
 body { background: #111; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px;}
@@ -71,7 +73,6 @@ button {
     <option value="qr">QR Scan</option>
   </select>
 
-  <!-- FORMAT (TOGGLED) -->
   <label id="formatContainer">
     Format:
     <select id="formatSelect">
@@ -108,9 +109,9 @@ let recorder = null;
 let chunks = [];
 let scanning = false;
 let currentMime = 'video/webm';
+let photoData = null; // ✅ added
 
-
-// ✅ TOGGLE FORMAT DROPDOWN
+// Toggle format dropdown
 function updateFormatVisibility() {
   if (modeSelect.value === 'video') {
     formatContainer.style.display = 'inline-block';
@@ -119,11 +120,9 @@ function updateFormatVisibility() {
     formatSelect.value = 'webm';
   }
 }
-
 modeSelect.addEventListener('change', updateFormatVisibility);
 
-
-// ✅ INIT
+// Init
 async function init() {
   try {
     await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -151,8 +150,7 @@ async function init() {
   }
 }
 
-
-// ✅ START CAMERA
+// Start camera (UNCHANGED)
 async function startCamera(deviceId) {
   if (stream) stream.getTracks().forEach(t => t.stop());
 
@@ -180,23 +178,23 @@ cameraSelect.addEventListener('change', () => {
   startCamera(cameraSelect.value);
 });
 
-
-// 📸 PHOTO
+// Photo (UPDATED)
 function takePhoto() {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0);
 
+  photoData = canvas.toDataURL('image/png'); // ✅ store image
+
   const img = document.createElement('img');
-  img.src = canvas.toDataURL();
+  img.src = photoData;
   preview.appendChild(img);
 
   downloadBtn.style.display = 'inline-block';
   status.textContent = 'Photo ready!';
 }
 
-
-// 🎥 VIDEO
+// Video (UNCHANGED)
 function startRecording() {
   chunks = [];
 
@@ -230,8 +228,7 @@ function startRecording() {
   status.textContent = 'Recording...';
 }
 
-
-// 🔍 QR (CLICKABLE LINKS RESTORED)
+// QR (UNCHANGED)
 function startQR() {
   scanning = true;
   startBtn.style.display = 'none';
@@ -270,11 +267,11 @@ function startQR() {
   loop();
 }
 
-
-// 🔘 BUTTONS
+// Buttons (UPDATED DOWNLOAD ONLY)
 startBtn.onclick = () => {
   preview.innerHTML = '';
   status.textContent = '';
+  photoData = null;
 
   if (modeSelect.value === 'photo') takePhoto();
   else if (modeSelect.value === 'video') startRecording();
@@ -290,15 +287,21 @@ stopBtn.onclick = () => {
 };
 
 downloadBtn.onclick = () => {
-  const blob = new Blob(chunks, { type: currentMime });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'recording.webm';
+
+  if (modeSelect.value === 'photo' && photoData) {
+    a.href = photoData;
+    a.download = 'photo.png';
+  } else {
+    const blob = new Blob(chunks, { type: currentMime });
+    a.href = URL.createObjectURL(blob);
+    a.download = currentMime.includes('mp4') ? 'recording.mp4' : 'recording.webm';
+  }
+
   a.click();
 };
 
-
-// 🚀 START
+// Start
 updateFormatVisibility();
 init();
 </script>
